@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Điều khiển relay</title>
+<meta name="theme-color" content="#14171a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Relay">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+<style>
+  :root{
+    --bg:#14171a;
+    --panel:#1c2024;
+    --panel-border:#2a2f34;
+    --text:#e9e7e2;
+    --text-dim:#8b9198;
+    --on:#34d17a;
+    --off:#4b5259;
+    --pending:#f0a202;
+    --danger:#e5484d;
+    --brand:#4f8cff;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:'Space Grotesk',system-ui,sans-serif;
+    min-height:100vh;
+    padding:24px 16px 48px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:720px;margin:0 auto;}
+
+  header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding-bottom:20px;
+    border-bottom:1px solid var(--panel-border);
+    margin-bottom:24px;
+  }
+  header h1{font-size:22px;font-weight:700;margin:0;letter-spacing:-0.01em;}
+  .status{display:flex;align-items:center;gap:8px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text-dim);}
+  .status .dot{width:8px;height:8px;border-radius:50%;background:var(--text-dim);transition:background .25s;}
+  .status.connecting .dot{background:var(--pending);animation:pulse 1.2s infinite;}
+  .status.connected .dot{background:var(--on);}
+  .status.offline .dot{background:var(--danger);}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(220px,1fr));gap:14px;margin-bottom:14px;}
+
+  .card{background:var(--panel);border:1px solid var(--panel-border);border-radius:10px;padding:18px;display:flex;align-items:center;justify-content:space-between;gap:12px;}
+  .card .info{display:flex;flex-direction:column;gap:6px;min-width:0;}
+  .card .name{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .card .led-row{display:flex;align-items:center;gap:6px;}
+  .card .led{width:7px;height:7px;border-radius:50%;background:var(--off);flex-shrink:0;}
+  .card .led.on{background:var(--on);box-shadow:0 0 6px rgba(52,209,122,.7);}
+  .card .led.pending{background:var(--pending);animation:pulse 1s infinite;}
+  .card .state-text{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-dim);}
+
+  .switch{position:relative;width:52px;height:30px;flex-shrink:0;background:var(--off);border-radius:999px;border:none;cursor:pointer;padding:0;transition:background .2s;}
+  .switch:focus-visible{outline:2px solid var(--brand);outline-offset:3px;}
+  .switch .thumb{position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#f2f1ee;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.4);}
+  .switch.on{background:var(--on);}
+  .switch.on .thumb{transform:translateX(22px);}
+  .switch.pending{background:var(--pending);}
+
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+
+  .cycle-box{display:flex;flex-direction:column;gap:10px;}
+  .cyc-head{display:flex;align-items:center;justify-content:space-between;}
+  .cyc-label{font-size:12px;color:var(--text-dim);font-family:'IBM Plex Mono',monospace;}
+
+  .mini-switch{position:relative;width:36px;height:20px;flex-shrink:0;background:var(--off);border-radius:999px;border:none;cursor:pointer;padding:0;transition:background .2s;}
+  .mini-switch .thumb{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#f2f1ee;transition:transform .2s;}
+  .mini-switch.on{background:var(--brand);}
+  .mini-switch.on .thumb{transform:translateX(16px);}
+
+  .duration-row{display:flex;align-items:center;gap:10px;}
+  .duration-field{display:flex;flex-direction:column;gap:4px;flex:1;}
+  .duration-field label{font-size:11px;color:var(--text-dim);font-family:'IBM Plex Mono',monospace;}
+  .duration-field .input-unit{display:flex;gap:6px;}
+  .duration-field input[type="number"]{
+    background:var(--bg);border:1px solid var(--panel-border);border-radius:6px;
+    color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:13px;
+    padding:7px 8px;width:100%;min-width:0;
+  }
+  .duration-field select{
+    background:var(--bg);border:1px solid var(--panel-border);border-radius:6px;
+    color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:12px;
+    padding:7px 4px;flex-shrink:0;
+  }
+
+  .saved-msg{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--on);opacity:0;transition:opacity .3s;}
+  .saved-msg.show{opacity:1;}
+
+  footer{margin-top:28px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-dim);text-align:center;}
+
+  .global-panel{
+    background:var(--panel);border:1px solid var(--panel-border);border-radius:10px;
+    padding:18px;margin-top:14px;display:flex;flex-direction:column;gap:14px;
+  }
+  .global-panel .count-field{display:flex;flex-direction:column;gap:4px;max-width:220px;}
+  .global-panel .count-field label{font-size:11px;color:var(--text-dim);font-family:'IBM Plex Mono',monospace;}
+  .global-panel input[type="number"], .global-panel input[type="time"]{
+    background:var(--bg);border:1px solid var(--panel-border);border-radius:6px;
+    color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:13px;
+    padding:7px 8px;width:100%;
+  }
+  .global-panel input[type="time"]::-webkit-calendar-picker-indicator{filter:invert(.7);}
+  .button-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .start-btn{
+    background:var(--on);color:#0c1220;border:none;border-radius:6px;
+    padding:10px 16px;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;transition:opacity .15s;
+  }
+  .start-btn:active{opacity:.7;}
+  .stop-btn{
+    background:transparent;color:var(--danger);border:1px solid var(--danger);border-radius:6px;
+    padding:10px 16px;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;transition:opacity .15s;
+  }
+  .stop-btn:active{opacity:.6;}
+  .options-btn{
+    background:transparent;color:var(--brand);border:1px solid var(--brand);border-radius:6px;
+    padding:10px 16px;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;transition:opacity .15s;
+  }
+  .options-btn:active{opacity:.6;}
+  .save-btn{
+    background:var(--brand);color:#0c1220;border:none;border-radius:6px;
+    padding:8px 12px;font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:13px;
+    cursor:pointer;transition:opacity .15s;
+  }
+  .save-btn:active{opacity:.7;}
+
+  .options-panel{display:none;flex-direction:column;gap:14px;}
+  .options-panel.open{display:flex;}
+  .options-section{border-top:1px solid var(--panel-border);padding-top:14px;}
+  .options-section:first-child{border-top:none;padding-top:0;}
+  .section-title{font-size:13px;font-weight:600;margin-bottom:10px;display:block;}
+
+  .countdown-display{font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--brand);}
+
+  .sched-row{
+    display:flex;align-items:center;gap:12px;
+    padding:10px 0;border-bottom:1px solid var(--panel-border);
+  }
+  .sched-row:last-child{border-bottom:none;}
+  .sched-row input[type="time"]{flex:1;}
+  .remove-btn{
+    background:transparent;color:var(--text-dim);border:1px solid var(--panel-border);border-radius:6px;
+    padding:6px 10px;font-family:'Space Grotesk',sans-serif;font-size:12px;cursor:pointer;flex-shrink:0;
+  }
+  .remove-btn:active{opacity:.6;}
+  .empty-sched-msg{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text-dim);padding:8px 0;}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>Điều khiển relay</h1>
+    <div class="status connecting" id="status">
+      <span class="dot"></span>
+      <span id="statusText">Đang kết nối…</span>
+    </div>
+  </header>
+
+  <div class="grid" id="grid"></div>
+
+  <div class="global-panel">
+    <div class="button-row">
+      <button class="start-btn" id="startAllBtn">Bắt đầu chạy</button>
+      <button class="start-btn" id="quickCountdownBtn">Hẹn giờ chạy</button>
+      <button class="stop-btn" id="stopAllBtn">Dừng</button>
+      <button class="options-btn" id="openOptionsBtn">Option</button>
+      <span class="saved-msg" id="global-saved-msg">Đã gửi lệnh</span>
+    </div>
+  </div>
+
+  <div class="global-panel options-panel" id="optionsPanel">
+
+    <div class="options-section">
+      <span class="section-title">Thời gian vòng lặp từng relay</span>
+      <div id="durationSettings"></div>
+    </div>
+
+    <div class="options-section">
+      <span class="section-title">Điều khiển vòng lặp chung (Relay 1 &amp; 2)</span>
+      <div class="count-field">
+        <label>Số lần chạy (để trống = chạy mãi không dừng)</label>
+        <input type="number" min="1" id="cycleCount" placeholder="Không giới hạn">
+      </div>
+    </div>
+
+    <div class="options-section">
+      <span class="section-title">Hẹn giờ đếm ngược cho nút "Bắt đầu chạy"</span>
+      <div class="duration-field">
+        <label>Chạy sau</label>
+        <div class="input-unit">
+          <input type="number" min="1" id="countdownValue" value="1">
+          <select id="countdownUnit">
+            <option value="s">Giây</option>
+            <option value="m">Phút</option>
+            <option value="h" selected>Giờ</option>
+          </select>
+        </div>
+      </div>
+      <div class="button-row" style="margin-top:10px;">
+        <button class="start-btn" id="scheduleCountdownBtn">Hẹn giờ chạy</button>
+        <button class="stop-btn" id="cancelCountdownBtn">Huỷ hẹn giờ</button>
+        <span class="saved-msg" id="countdown-saved-msg">Đã hẹn giờ</span>
+      </div>
+      <span class="countdown-display" id="countdownDisplay"></span>
+    </div>
+
+    <div class="options-section">
+      <span class="section-title">Hẹn giờ theo lịch (nhiều lịch, lặp lại mỗi ngày)</span>
+      <div id="scheduleList"></div>
+      <div class="button-row" style="margin-top:10px;">
+        <button class="save-btn" id="addScheduleBtn">+ Thêm lịch hẹn giờ</button>
+      </div>
+      <div class="button-row">
+        <button class="start-btn" id="saveScheduleBtn">Lưu tất cả lịch hẹn giờ</button>
+        <span class="saved-msg" id="schedule-saved-msg">Đã lưu</span>
+      </div>
+    </div>
+
+  </div>
+
+  <footer id="footer"></footer>
+</div>
+
+<script>
+// ---------- CẤU HÌNH: thông tin HiveMQ Cloud của bạn ----------
+const CONFIG = {
+  MQTT_HOST: 'bc8a20d444b249d6ba01d839a2d02d84.s1.eu.hivemq.cloud',
+  MQTT_WSS_PORT: 8884,
+  MQTT_PATH: '/mqtt',
+  MQTT_USERNAME: 'TAI',
+  MQTT_PASSWORD: '011088tai',
+  TOPIC_PREFIX: 'home/relay',
+  RELAYS: [
+    { id: 1, name: 'Relay 1' },
+    { id: 2, name: 'Relay 2' },
+  ],
+};
+const CYCLE_RELAY_IDS = [1, 2]; // Relay 1 và Relay 2 đều có chức năng bật/tắt vòng lặp
+// ---------------------------------------------------------------------
+
+const state = {};   // { [id]: 'on' | 'off' | 'pending' | 'unknown' }
+const cycle = {};   // { [id]: { enabled, onSeconds, offSeconds, maxCycles } }
+
+CONFIG.RELAYS.forEach(r => {
+  state[r.id] = 'unknown';
+  cycle[r.id] = { enabled: false, onSeconds: 600, offSeconds: 1200, maxCycles: 0 };
+});
+
+// Chuyển số giây thành {value, unit} để hiển thị đẹp (ưu tiên đơn vị lớn nhất chia hết)
+function secondsToUnit(totalSeconds) {
+  if (totalSeconds % 3600 === 0) return { value: totalSeconds / 3600, unit: 'h' };
+  if (totalSeconds % 60 === 0) return { value: totalSeconds / 60, unit: 'm' };
+  return { value: totalSeconds, unit: 's' };
+}
+function unitToSeconds(value, unit) {
+  const n = Number(value) || 0;
+  if (unit === 'h') return n * 3600;
+  if (unit === 'm') return n * 60;
+  return n;
+}
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+const grid = document.getElementById('grid');
+const statusEl = document.getElementById('status');
+const statusText = document.getElementById('statusText');
+document.getElementById('footer').textContent = CONFIG.MQTT_HOST;
+
+function topicSet(id)   { return `${CONFIG.TOPIC_PREFIX}/${id}/set`; }
+function topicState(id) { return `${CONFIG.TOPIC_PREFIX}/${id}/state`; }
+function topicCycle(id) { return `${CONFIG.TOPIC_PREFIX}/${id}/cycle`; }
+
+// ---------- Card bật/tắt relay (giao diện chính) ----------
+function render() {
+  grid.innerHTML = '';
+  CONFIG.RELAYS.forEach(r => {
+    const s = state[r.id];
+    const ledClass = s === 'on' ? 'on' : s === 'pending' ? 'pending' : '';
+    const stateLabel = { on: 'Đang bật', off: 'Đang tắt', pending: 'Đang gửi lệnh…', unknown: 'Chưa rõ trạng thái' }[s];
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="info">
+        <div class="name">${r.name}</div>
+        <div class="led-row">
+          <span class="led ${ledClass}"></span>
+          <span class="state-text">${stateLabel}</span>
+        </div>
+      </div>
+      <button class="switch ${s === 'on' ? 'on' : ''} ${s === 'pending' ? 'pending' : ''}"
+              aria-label="Bật/tắt ${r.name}" data-action="toggle" data-id="${r.id}">
+        <span class="thumb"></span>
+      </button>
+    `;
+    grid.appendChild(card);
+  });
+
+  grid.querySelectorAll('[data-action="toggle"]').forEach(btn => {
+    btn.addEventListener('click', () => toggleRelay(Number(btn.dataset.id)));
+  });
+}
+render();
+
+function toggleRelay(id) {
+  if (!client.isConnected()) return;
+  const goingOn = state[id] !== 'on';
+  state[id] = 'pending';
+  render();
+  publish(topicSet(id), goingOn ? 'ON' : 'OFF', false);
+}
+
+// ---------- Cài đặt thời gian vòng lặp từng relay (trong khung Tuỳ chọn) ----------
+function renderDurationSettings() {
+  const container = document.getElementById('durationSettings');
+  container.innerHTML = CYCLE_RELAY_IDS.map(id => {
+    const r = CONFIG.RELAYS.find(x => x.id === id);
+    const cyc = cycle[id];
+    const onU = secondsToUnit(cyc.onSeconds);
+    const offU = secondsToUnit(cyc.offSeconds);
+    const unitLabel = { s: 'Giây', m: 'Phút', h: 'Giờ' };
+    const unitOptions = u => ['s','m','h'].map(x =>
+      `<option value="${x}" ${x === u ? 'selected' : ''}>${unitLabel[x]}</option>`).join('');
+
+    return `
+      <div class="cycle-box" style="margin-bottom:14px;">
+        <span class="cyc-label">${r.name}</span>
+        <div class="duration-row">
+          <div class="duration-field">
+            <label>Bật trong</label>
+            <div class="input-unit">
+              <input type="number" min="1" data-role="onValue" data-id="${id}" value="${onU.value}">
+              <select data-role="onUnit" data-id="${id}">${unitOptions(onU.unit)}</select>
+            </div>
+          </div>
+          <div class="duration-field">
+            <label>Tắt trong</label>
+            <div class="input-unit">
+              <input type="number" min="1" data-role="offValue" data-id="${id}" value="${offU.value}">
+              <select data-role="offUnit" data-id="${id}">${unitOptions(offU.unit)}</select>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('input[data-role="onValue"], select[data-role="onUnit"], input[data-role="offValue"], select[data-role="offUnit"]')
+    .forEach(el => el.addEventListener('change', () => {
+      const id = Number(el.dataset.id);
+      syncCycleFromInputs(id);
+      autoSaveCycleConfig(id); // thay đổi là lưu luôn, không cần bấm "Bắt đầu chạy" mới lưu
+    }));
+}
+renderDurationSettings();
+
+function syncCycleFromInputs(id) {
+  const onValue = document.querySelector(`[data-role="onValue"][data-id="${id}"]`).value;
+  const onUnit = document.querySelector(`[data-role="onUnit"][data-id="${id}"]`).value;
+  const offValue = document.querySelector(`[data-role="offValue"][data-id="${id}"]`).value;
+  const offUnit = document.querySelector(`[data-role="offUnit"][data-id="${id}"]`).value;
+  cycle[id].onSeconds = unitToSeconds(onValue, onUnit);
+  cycle[id].offSeconds = unitToSeconds(offValue, offUnit);
+}
+
+// Lưu lại cấu hình thời gian bật/tắt + số lần chạy của 1 relay, giữ nguyên trạng thái
+// đang chạy hay không (không tự bật/tắt relay chỉ vì đổi thời gian).
+function autoSaveCycleConfig(id) {
+  if (!client.isConnected()) return;
+  const cyc = cycle[id];
+  const payload = JSON.stringify({
+    enabled: cyc.enabled,
+    onSeconds: cyc.onSeconds,
+    offSeconds: cyc.offSeconds,
+    maxCycles: cyc.maxCycles,
+  });
+  publish(topicCycle(id), payload, true);
+}
+
+document.getElementById('cycleCount').addEventListener('change', () => {
+  const countInput = document.getElementById('cycleCount').value;
+  const maxCycles = countInput ? Number(countInput) : 0;
+  CYCLE_RELAY_IDS.forEach(id => {
+    cycle[id].maxCycles = maxCycles;
+    autoSaveCycleConfig(id); // thay đổi số lần chạy cũng lưu luôn ngay lập tức
+  });
+});
+
+// ---------- Nút "Chạy hẹn giờ" mở/đóng khung Tuỳ chọn ----------
+document.getElementById('openOptionsBtn').addEventListener('click', () => {
+  document.getElementById('optionsPanel').classList.toggle('open');
+});
+
+// ---------- Bắt đầu / Dừng vòng lặp chung ----------
+function startAllCycles() {
+  if (!client.isConnected()) return;
+  const countInput = document.getElementById('cycleCount').value;
+  const maxCycles = countInput ? Number(countInput) : 0; // trống = 0 = chạy mãi
+
+  CYCLE_RELAY_IDS.forEach(id => {
+    syncCycleFromInputs(id); // lấy đúng thời gian bật/tắt mới nhất đang nhập trên form
+    const cyc = cycle[id];
+    const payload = JSON.stringify({
+      enabled: true,
+      onSeconds: cyc.onSeconds,
+      offSeconds: cyc.offSeconds,
+      maxCycles: maxCycles,
+    });
+    publish(topicCycle(id), payload, true); // retained: ESP32 nhớ lại cấu hình sau khi mất điện
+  });
+
+  showGlobalMsg('Đã bắt đầu chạy');
+}
+
+function stopAllCycles() {
+  if (!client.isConnected()) return;
+  const countInput = document.getElementById('cycleCount').value;
+  const maxCycles = countInput ? Number(countInput) : 0; // giữ nguyên số lần chạy đang đặt, không reset về 0
+
+  CYCLE_RELAY_IDS.forEach(id => {
+    cycle[id].enabled = false;
+    const payload = JSON.stringify({
+      enabled: false,
+      onSeconds: cycle[id].onSeconds,
+      offSeconds: cycle[id].offSeconds,
+      maxCycles: maxCycles,
+    });
+    publish(topicCycle(id), payload, true);
+    publish(topicSet(id), 'OFF', false); // tắt relay ngay lập tức, không đợi hết pha hiện tại
+  });
+
+  // Nút Dừng dừng TẤT CẢ — kể cả khi đang đếm ngược chờ tự chạy, huỷ luôn không cần biết cái nào đang chạy
+  publish(topicStartCountdown(), JSON.stringify({ delaySeconds: 0 }), false);
+  if (countdownInterval) clearInterval(countdownInterval);
+  updateCountdownDisplay(0);
+
+  render();
+  showGlobalMsg('Đã dừng tất cả');
+}
+
+function showGlobalMsg(text) {
+  const msg = document.getElementById('global-saved-msg');
+  msg.textContent = text;
+  msg.classList.add('show');
+  setTimeout(() => msg.classList.remove('show'), 1800);
+}
+
+document.getElementById('startAllBtn').addEventListener('click', startAllCycles);
+document.getElementById('stopAllBtn').addEventListener('click', stopAllCycles);
+document.getElementById('quickCountdownBtn').addEventListener('click', () => scheduleCountdown());
+
+// ---------- Hẹn giờ đếm ngược cho nút "Bắt đầu chạy" ----------
+function topicStartCountdown() { return `${CONFIG.TOPIC_PREFIX}/start-countdown`; }
+
+let countdownInterval = null;
+
+function updateCountdownDisplay(remainingSeconds) {
+  const display = document.getElementById('countdownDisplay');
+  if (remainingSeconds <= 0) {
+    display.textContent = '';
+    return;
+  }
+  const hh = Math.floor(remainingSeconds / 3600);
+  const mm = Math.floor((remainingSeconds % 3600) / 60);
+  const ss = remainingSeconds % 60;
+  display.textContent = `Sẽ tự chạy sau: ${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
+}
+
+function scheduleCountdown() {
+  if (!client.isConnected()) return;
+  const value = document.getElementById('countdownValue').value;
+  const unit = document.getElementById('countdownUnit').value;
+  const totalSeconds = unitToSeconds(value, unit);
+  if (totalSeconds <= 0) return;
+
+  publish(topicStartCountdown(), JSON.stringify({ delaySeconds: totalSeconds }), false);
+
+  const msg = document.getElementById('countdown-saved-msg');
+  msg.textContent = 'Đã hẹn giờ';
+  msg.classList.add('show');
+  setTimeout(() => msg.classList.remove('show'), 1800);
+
+  let remaining = totalSeconds;
+  if (countdownInterval) clearInterval(countdownInterval);
+  updateCountdownDisplay(remaining);
+  countdownInterval = setInterval(() => {
+    remaining--;
+    updateCountdownDisplay(remaining);
+    if (remaining <= 0) {
+      clearInterval(countdownInterval);
+      showGlobalMsg('Đến giờ — đã tự động bắt đầu chạy');
+    }
+  }, 1000);
+}
+
+function cancelCountdown() {
+  if (!client.isConnected()) return;
+  publish(topicStartCountdown(), JSON.stringify({ delaySeconds: 0 }), false);
+  if (countdownInterval) clearInterval(countdownInterval);
+  updateCountdownDisplay(0);
+  showGlobalMsg('Đã huỷ hẹn giờ');
+}
+
+document.getElementById('scheduleCountdownBtn').addEventListener('click', scheduleCountdown);
+document.getElementById('cancelCountdownBtn').addEventListener('click', cancelCountdown);
+
+// Tự lưu lại con số/đơn vị đếm ngược đã nhập (chỉ để nhớ lại cho lần sau, KHÔNG tự bấm chạy đếm ngược)
+function topicCountdownPref() { return `${CONFIG.TOPIC_PREFIX}/countdown-pref`; }
+
+function saveCountdownPref() {
+  if (!client.isConnected()) return;
+  const value = document.getElementById('countdownValue').value;
+  const unit = document.getElementById('countdownUnit').value;
+  publish(topicCountdownPref(), JSON.stringify({ value, unit }), true);
+}
+
+document.getElementById('countdownValue').addEventListener('change', saveCountdownPref);
+document.getElementById('countdownUnit').addEventListener('change', saveCountdownPref);
+
+// ---------- Hẹn giờ theo lịch (nhiều lịch, mỗi ngày) ----------
+function topicStartSchedule() { return `${CONFIG.TOPIC_PREFIX}/start-schedule`; }
+
+let schedules = []; // [{ enabled, hour, minute }, ...]
+
+function renderSchedules() {
+  const list = document.getElementById('scheduleList');
+  if (schedules.length === 0) {
+    list.innerHTML = '<div class="empty-sched-msg">Chưa có lịch hẹn giờ nào — bấm "+ Thêm lịch hẹn giờ" để tạo.</div>';
+    return;
+  }
+  list.innerHTML = schedules.map((s, idx) => `
+    <div class="sched-row">
+      <button class="mini-switch ${s.enabled ? 'on' : ''}" data-action="toggle-sched" data-idx="${idx}"
+              aria-label="Bật/tắt lịch hẹn giờ ${idx + 1}">
+        <span class="thumb"></span>
+      </button>
+      <input type="time" data-role="sched-time" data-idx="${idx}" value="${pad2(s.hour)}:${pad2(s.minute)}">
+      <button class="remove-btn" data-action="remove-sched" data-idx="${idx}">Xoá</button>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('[data-action="toggle-sched"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      schedules[Number(btn.dataset.idx)].enabled = !schedules[Number(btn.dataset.idx)].enabled;
+      renderSchedules();
+      saveStartSchedules();
+    });
+  });
+  list.querySelectorAll('[data-action="remove-sched"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      schedules.splice(Number(btn.dataset.idx), 1);
+      renderSchedules();
+      saveStartSchedules(); // xoá là lưu luôn ngay, không cần bấm thêm nút "Lưu" mới mất hẳn
+    });
+  });
+  list.querySelectorAll('input[data-role="sched-time"]').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const [h, m] = inp.value.split(':').map(Number);
+      schedules[Number(inp.dataset.idx)].hour = h;
+      schedules[Number(inp.dataset.idx)].minute = m;
+    });
+  });
+}
+renderSchedules();
+
+document.getElementById('addScheduleBtn').addEventListener('click', () => {
+  schedules.push({ enabled: true, hour: 7, minute: 0 });
+  renderSchedules();
+});
+
+function saveStartSchedules() {
+  if (!client.isConnected()) return;
+  publish(topicStartSchedule(), JSON.stringify(schedules), true);
+
+  const msg = document.getElementById('schedule-saved-msg');
+  msg.classList.add('show');
+  setTimeout(() => msg.classList.remove('show'), 1800);
+}
+
+document.getElementById('saveScheduleBtn').addEventListener('click', saveStartSchedules);
+
+// ---------- MQTT ----------
+function publish(topic, payload, retained) {
+  const msg = new Paho.MQTT.Message(payload);
+  msg.destinationName = topic;
+  msg.qos = 1;
+  msg.retained = !!retained;
+  client.send(msg);
+}
+
+function setStatus(mode, text) {
+  statusEl.className = 'status ' + mode;
+  statusText.textContent = text;
+}
+
+const clientId = 'web-' + Math.random().toString(16).slice(2);
+const client = new Paho.MQTT.Client(CONFIG.MQTT_HOST, CONFIG.MQTT_WSS_PORT, CONFIG.MQTT_PATH, clientId);
+
+client.onConnectionLost = () => {
+  setStatus('offline', 'Mất kết nối — đang thử lại…');
+  CONFIG.RELAYS.forEach(r => state[r.id] = 'unknown');
+  render();
+  setTimeout(connect, 3000);
+};
+
+client.onMessageArrived = (message) => {
+  if (message.destinationName === topicCountdownPref()) {
+    try {
+      const data = JSON.parse(message.payloadString);
+      document.getElementById('countdownValue').value = data.value;
+      document.getElementById('countdownUnit').value = data.unit;
+    } catch (e) { /* bỏ qua payload lỗi */ }
+    return;
+  }
+
+  if (message.destinationName === topicStartSchedule()) {
+    try {
+      const data = JSON.parse(message.payloadString);
+      schedules = Array.isArray(data) ? data.map(s => ({
+        enabled: !!s.enabled,
+        hour: Number(s.hour) || 0,
+        minute: Number(s.minute) || 0,
+      })) : [];
+      renderSchedules();
+    } catch (e) { /* bỏ qua payload lỗi */ }
+    return;
+  }
+
+  const parts = message.destinationName.split('/'); // home/relay/<id>/state hoặc /cycle
+  const id = Number(parts[2]);
+  const kind = parts[3];
+  if (!(id in state)) return;
+
+  if (kind === 'state') {
+    state[id] = message.payloadString === 'ON' ? 'on' : 'off';
+    render();
+  } else if (kind === 'cycle') {
+    try {
+      const data = JSON.parse(message.payloadString);
+      cycle[id] = {
+        enabled: !!data.enabled,
+        onSeconds: Number(data.onSeconds) || 60,
+        offSeconds: Number(data.offSeconds) || 60,
+        maxCycles: Number(data.maxCycles) || 0,
+      };
+      renderDurationSettings();
+      if (id === 1) {
+        const countInput = document.getElementById('cycleCount');
+        countInput.value = cycle[id].maxCycles > 0 ? cycle[id].maxCycles : '';
+      }
+    } catch (e) { /* bỏ qua payload lỗi */ }
+  }
+};
+
+function connect() {
+  setStatus('connecting', 'Đang kết nối…');
+  client.connect({
+    useSSL: true,
+    userName: CONFIG.MQTT_USERNAME,
+    password: CONFIG.MQTT_PASSWORD,
+    keepAliveInterval: 30,
+    onSuccess: () => {
+      setStatus('connected', 'Đã kết nối');
+      CONFIG.RELAYS.forEach(r => {
+        client.subscribe(topicState(r.id));
+        if (CYCLE_RELAY_IDS.includes(r.id)) client.subscribe(topicCycle(r.id));
+      });
+      client.subscribe(topicStartSchedule());
+      client.subscribe(topicCountdownPref());
+    },
+    onFailure: () => {
+      setStatus('offline', 'Không kết nối được — đang thử lại…');
+      setTimeout(connect, 3000);
+    }
+  });
+}
+connect();
+</script>
+</body>
+</html>
